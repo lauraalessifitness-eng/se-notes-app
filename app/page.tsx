@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
@@ -506,6 +506,33 @@ const FONT_COLORS = [
 
 function uid() { return Math.random().toString(36).slice(2); }
 
+// ─── localStorage helpers ───────────────────────────────────────────────────
+const STORAGE_KEYS = {
+  days: "se-app-days",
+  checklist: "se-app-checklist",
+  adminDocsMeta: "se-app-admin-docs",
+};
+
+interface SaveableDayData {
+  notes: string;
+  triggerActive: boolean;
+  triggerNote: string;
+  slidesMeta: { name: string; size: number; id: string }[];
+  summary: string | null;
+}
+
+function loadFromStorage<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+
+function saveToStorage<T>(key: string, value: T) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
 // ─── Toolbar ────────────────────────────────────────────────────────────────
 function EditorToolbar({ editor }: { editor: ReturnType<typeof useEditor> | null }) {
   if (!editor) return null;
@@ -550,15 +577,38 @@ function EditorToolbar({ editor }: { editor: ReturnType<typeof useEditor> | null
 export default function SENotesApp() {
   const [activePage, setActivePage] = useState<"notes" | "admin">("notes");
   const [activeDay, setActiveDay] = useState("mar12");
-  const [days, setDays] = useState<Record<string, DayData>>(() =>
-    Object.fromEntries(DAYS.map((d) => [d.id, EMPTY_DAY()]))
-  );
+  const [days, setDays] = useState<Record<string, DayData>>(() => {
+    const saved = loadFromStorage<Record<string, SaveableDayData> | null>(STORAGE_KEYS.days, null);
+    if (saved) {
+      const restored: Record<string, DayData> = {};
+      for (const d of DAYS) {
+        const s = saved[d.id];
+        if (s) {
+          restored[d.id] = {
+            notes: s.notes, triggerActive: s.triggerActive,
+            triggerNote: s.triggerNote, summary: s.summary,
+            slides: (s.slidesMeta || []).map((m) => ({ ...m, file: null as unknown as File })),
+            generating: false,
+          };
+        } else {
+          restored[d.id] = EMPTY_DAY();
+        }
+      }
+      return restored;
+    }
+    return Object.fromEntries(DAYS.map((d) => [d.id, EMPTY_DAY()]));
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
   // Admin state
-  const [adminDocs, setAdminDocs] = useState<AdminDoc[]>([]);
-  const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+  const [adminDocs, setAdminDocs] = useState<AdminDoc[]>(() => {
+    const saved = loadFromStorage<{ name: string; size: number; id: string }[]>(STORAGE_KEYS.adminDocsMeta, []);
+    return saved.map((m) => ({ ...m, file: null as unknown as File }));
+  });
+  const [checklist, setChecklist] = useState<ChecklistItem[]>(() =>
+    loadFromStorage<ChecklistItem[]>(STORAGE_KEYS.checklist, [])
+  );
   const [newTask, setNewTask] = useState("");
   const [adminDragOver, setAdminDragOver] = useState(false);
   const adminFileRef = useRef<HTMLInputElement>(null);
@@ -573,6 +623,30 @@ export default function SENotesApp() {
       })),
     [activeDay]
   );
+
+  // ── Persist state to localStorage ──
+  useEffect(() => {
+    const saveable: Record<string, SaveableDayData> = {};
+    for (const [id, d] of Object.entries(days)) {
+      saveable[id] = {
+        notes: d.notes,
+        triggerActive: d.triggerActive,
+        triggerNote: d.triggerNote,
+        summary: d.summary,
+        slidesMeta: d.slides.map((s) => ({ name: s.name, size: s.size, id: s.id })),
+      };
+    }
+    saveToStorage(STORAGE_KEYS.days, saveable);
+  }, [days]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.checklist, checklist);
+  }, [checklist]);
+
+  useEffect(() => {
+    const meta = adminDocs.map((d) => ({ name: d.name, size: d.size, id: d.id }));
+    saveToStorage(STORAGE_KEYS.adminDocsMeta, meta);
+  }, [adminDocs]);
 
   const editor = useEditor({
     immediatelyRender: false,
