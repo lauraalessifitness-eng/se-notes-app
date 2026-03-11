@@ -507,7 +507,7 @@ const FONT_COLORS = [
 function uid() { return Math.random().toString(36).slice(2); }
 
 // ─── Toolbar ────────────────────────────────────────────────────────────────
-function EditorToolbar({ editor }: { editor: ReturnType<typeof useEditor> }) {
+function EditorToolbar({ editor }: { editor: ReturnType<typeof useEditor> | null }) {
   if (!editor) return null;
   return (
     <div className="editor-toolbar">
